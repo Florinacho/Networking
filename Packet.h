@@ -18,6 +18,10 @@ public:
 
 	void push_back(const void* bytes, unsigned int length);
 
+	bool pop_front(void* bytes, const unsigned int length);
+
+	bool pop_back(void* bytes, const unsigned int length);
+
 	bool read(void* bytes, int length, int offset);
 
 	bool read(void* bytes, int length);

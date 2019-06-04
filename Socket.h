@@ -9,6 +9,7 @@ class Socket {
 	int fd;
 	int type;
 	sockaddr_in address;
+	bool broadcastOption;
 
 public:
 	enum Type {
@@ -30,6 +31,10 @@ public:
 	// Destroy the  file descriptor
 	void uninitialize();
 
+	void setBroadcast(bool value);
+
+	bool getBroadcast() const;
+
 	// Verify if the connection is active. Updated after send, receive
 	bool isValid() const;
 
@@ -49,7 +54,7 @@ public:
 	bool receive(Packet& packet, sockaddr_in* newaddress, bool blocking = true);
 
 	// Broadcast a packet 
-	bool broadcast(const Packet& packet, int port);
+	bool sendBroadcast(const Packet& packet, int port);
 
 	// Send a TCP packet
 	bool send(const Packet& packet);

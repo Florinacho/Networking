@@ -17,6 +17,8 @@ int main(int argc, char *argv[]) {
 		return 1;
 	}
 
+	client.setBroadcast(true);
+
 	while (running) {
 		printf("Message: ");
 		std::getline(std::cin, line);
@@ -27,7 +29,7 @@ int main(int argc, char *argv[]) {
 		} else if (line == "info") {
 			printf("\nUDP client\n\tIP: %s\n\tPORT: %d\n\n", client.getIPStr(), client.getPort());
 		} else {
-			client.broadcast(Packet(line.c_str(), line.size() + 1), PortAddress);
+			client.sendBroadcast(Packet(line.c_str(), line.size() + 1), PortAddress);
 
 			if (client.receive(packet, &address, true)) {
 				printf("Received from %s::%d: \"%s\"[%d]\n", inet_ntoa(address.sin_addr), address.sin_port, (char*)packet.getData(), packet.getSize());

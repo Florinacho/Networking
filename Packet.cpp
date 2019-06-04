@@ -25,6 +25,32 @@ void Packet::push_back(const void* bytes, unsigned int length) {
 	data.insert(data.end(), (unsigned char*)bytes, (unsigned char*)bytes + length);
 }
 
+bool Packet::pop_front(void* bytes, const unsigned int length) {
+	if (data.size() < length) {
+		return false;
+	}
+
+	if (bytes) {
+		memcpy(bytes, &data.front(), length);
+	}
+	data.erase(data.begin(), data.begin() + length);
+
+	return true;
+}
+
+bool Packet::pop_back(void* bytes, const unsigned int length) {
+	if (data.size() < length) {
+		return false;
+	}
+
+	if (bytes) {
+		memcpy(bytes, (unsigned char*)&data.back() - length, length);
+	}
+	data.erase(data.end() - length - 1, data.end() - 1);
+
+	return true;
+}
+
 bool Packet::read(void* bytes, int length, int offset) {
 	if (offset + length >= data.size()) {
 		return false;

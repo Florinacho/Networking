@@ -83,6 +83,30 @@ void Socket::uninitialize() {
 	memset(&address, 0, sizeof(address));
 }
 
+void Socket::setBroadcast(bool value) {
+	if (isValid() == false) {
+		return;
+	}
+
+	if (type != Socket::UDP) {
+		return;
+	}
+
+	if (broadcastOption == value) {
+		return;
+	}
+
+	int ivalue = value;
+	if (setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &ivalue, sizeof(ivalue)) == -1) {
+		return;
+	}
+	broadcastOption = value;
+}
+
+bool Socket::getBroadcast() const {
+	return (type == Socket::UDP) ? broadcastOption : false;
+}
+
 bool Socket::isValid() const {
 	return (fd != -1);
 }
@@ -157,11 +181,20 @@ bool Socket::send(const Packet& packet, const sockaddr_in& newaddress) {
 		return false;
 	}
 
-	if ((::sendto(fd, packet.getData(), packet.getSize(), 0, (sockaddr *)&newaddress, sizeof(sockaddr_in))) < 0) {
-		close(fd);
-		fd = -1;
-		return false;
+	int totalBytesSent = 0;
+	int bytesSent = 0;
+	int bytesLeft = packet.getSize();
+
+	while (totalBytesSent < packet.getSize()) {
+		if ((bytesSent = ::sendto(fd, packet.getData(), bytesLeft, 0, (sockaddr *)&newaddress, sizeof(sockaddr_in))) < 0) {
+			close(fd);
+			fd = -1;
+			return false;
+		}
+		bytesLeft -= bytesSent;
+		totalBytesSent += bytesSent;
 	}
+	
 	return true;
 }
 
@@ -207,12 +240,12 @@ bool Socket::receive(Packet& packet, sockaddr_in* newaddress, bool blocking) {
 	return true;
 }
 
-bool Socket::broadcast(const Packet& packet, int port) {
+bool Socket::sendBroadcast(const Packet& packet, int port) {
 	sockaddr_in address;
 	memset(&address, 0, sizeof(address));
 	address.sin_family = AF_INET;
 	address.sin_port = htons(port);
-	address.sin_addr.s_addr = INADDR_ANY;
+	address.sin_addr.s_addr = INADDR_BROADCAST;//INADDR_ANY;
 
 	return send(packet, address);
 }
@@ -226,10 +259,18 @@ bool Socket::send(const Packet& packet) {
 		return false;
 	}
 
-	if (::send(fd, packet.getData(), packet.getSize(), 0) == -1) {
-		close(fd);
-		fd = -1;
-		return false;
+	int totalBytesSent = 0;
+	int bytesSent = 0;
+	int bytesLeft = packet.getSize();
+
+	while (totalBytesSent < packet.getSize()) {
+		if ((bytesSent = ::send(fd, packet.getData(), bytesLeft, 0)) == -1) {
+			close(fd);
+			fd = -1;
+			return false;
+		}
+		bytesLeft -= bytesSent;
+		totalBytesSent += bytesSent;
 	}
 
 	return true;
