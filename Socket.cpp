@@ -7,8 +7,44 @@
 
 #include <sys/socket.h>
 
+bool sendall(int fd, const void* data, int *length) {
+	int totalBytesSent = 0;
+	int bytesSent = 0;
+	int bytesLeft = *length;
+
+	while(totalBytesSent < *length) {
+		bytesSent = send(fd, (const unsigned char*)data + totalBytesSent, bytesLeft, 0);
+		if (bytesSent <= 0) { 
+			*length = totalBytesSent;
+			return false;
+		}
+		totalBytesSent += bytesSent;
+		bytesLeft -= bytesSent;
+	}
+	*length = totalBytesSent;
+	return true;
+} 
+
+bool receiveall(int fd, void* data, int* length) {
+	int totalBytesReceived = 0;
+	int bytesReceived = 0;
+	int bytesLeft = *length;
+
+	while (totalBytesReceived < *length) {
+		bytesReceived = ::recv(fd, (unsigned char*)data + totalBytesReceived, bytesLeft, 0);
+		if (bytesReceived <= 0) {
+			*length = totalBytesReceived;
+			return false;
+		}
+		totalBytesReceived += bytesReceived;
+		bytesLeft -= bytesReceived;
+	}
+	*length = totalBytesReceived;
+	return true;
+}
+
 Socket::Socket()
-	: fd(-1), type(-1) {
+	: fd(-1), type(-1), broadcastOption(false) {
 	memset(&address, 0, sizeof(address));
 }
 
@@ -16,10 +52,7 @@ Socket::~Socket() {
 }
 
 bool Socket::initialize(const Type& ntype) {
-	if (fd != -1) {
-		close(fd);
-		fd = -1;
-	}
+	uninitialize();
 
 	switch (ntype) {
 	case Socket::UDP :
@@ -43,6 +76,13 @@ bool Socket::initialize(const Type& ntype) {
 		return false;
 	}
 
+	timeval tv;
+	tv.tv_sec = 0;
+	tv.tv_usec = 100;
+//	if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) != 0) {
+//		return false;
+//	}
+
 	return true;
 }
 
@@ -65,8 +105,7 @@ bool Socket::initialize(const Type& ntype, const char* ip, int port) {
 	address.sin_port = htons(port);
  
 	if (bind(fd, (sockaddr*)&address, addressLength) < 0) {
-		close(fd);
-		fd = -1;
+		uninitialize();
 		return false;
 	}
 	
@@ -81,6 +120,7 @@ void Socket::uninitialize() {
 	type = -1;
 
 	memset(&address, 0, sizeof(address));
+	broadcastOption = false;
 }
 
 void Socket::setBroadcast(bool value) {
@@ -142,9 +182,7 @@ bool Socket::accept(Socket* socket, bool blocking) {
 		tv.tv_usec = 0;
 
 		int status = select(fd + 1, &set, NULL, NULL, &tv);
-		if (status == -1) {
-			return false;
-		} else if (status == 0) {
+		if (status <= 0) {
 			return false;
 		} 
 	}
@@ -172,7 +210,8 @@ bool Socket::connect(const char* ip, int port) {
 	return true;
 }
 
-bool Socket::send(const Packet& packet, const sockaddr_in& newaddress) {
+//bool Socket::send(const Packet& packet, const sockaddr_in& newaddress) {
+bool Socket::send(const Packet& packet, const IPAddress& newaddress) {
 	if (isValid() == false) {
 		return false;
 	}
@@ -181,24 +220,20 @@ bool Socket::send(const Packet& packet, const sockaddr_in& newaddress) {
 		return false;
 	}
 
-	int totalBytesSent = 0;
-	int bytesSent = 0;
-	int bytesLeft = packet.getSize();
+	sockaddr_in addr;
+	memset(&addr, 0, sizeof(addr));
+	addr.sin_family = AF_INET;
+	addr.sin_port = newaddress.port;
+	addr.sin_addr.s_addr = newaddress.ip;
 
-	while (totalBytesSent < packet.getSize()) {
-		if ((bytesSent = ::sendto(fd, packet.getData(), bytesLeft, 0, (sockaddr *)&newaddress, sizeof(sockaddr_in))) < 0) {
-			close(fd);
-			fd = -1;
-			return false;
-		}
-		bytesLeft -= bytesSent;
-		totalBytesSent += bytesSent;
+	if (::sendto(fd, packet.getData(), packet.getSize(), 0, (sockaddr *)&addr, sizeof(sockaddr_in)) <= 0) {
+		return false;
 	}
 	
 	return true;
 }
 
-bool Socket::receive(Packet& packet, sockaddr_in* newaddress, bool blocking) {
+bool Socket::receive(Packet& packet, IPAddress* newaddress, bool blocking) {
 	const unsigned int bufferLength = 1024;
 	char* buffer[bufferLength];
 	socklen_t inAddressLength = sizeof(sockaddr_in);
@@ -232,25 +267,32 @@ bool Socket::receive(Packet& packet, sockaddr_in* newaddress, bool blocking) {
 	packet.clear();
 
 	memset(buffer, 0, bufferLength);
-	if ((receivedLength = recvfrom(fd, buffer, bufferLength, 0, (sockaddr*)newaddress, &inAddressLength)) < 0) {
+
+	sockaddr_in addr;
+	if ((receivedLength = recvfrom(fd, buffer, bufferLength, 0, (sockaddr*)&addr, &inAddressLength)) <= 0) {
 		return false;
 	}
-
+	if (newaddress) {
+		newaddress->port = addr.sin_port;
+		newaddress->ip = addr.sin_addr.s_addr;
+	}
 	packet.set(buffer, receivedLength);
 	return true;
 }
 
 bool Socket::sendBroadcast(const Packet& packet, int port) {
-	sockaddr_in address;
-	memset(&address, 0, sizeof(address));
-	address.sin_family = AF_INET;
-	address.sin_port = htons(port);
-	address.sin_addr.s_addr = INADDR_BROADCAST;//INADDR_ANY;
+	IPAddress newaddress;
+	newaddress.ip = INADDR_BROADCAST;//INADDR_ANY;
+	newaddress.port = htons(port);
 
-	return send(packet, address);
+	return send(packet, newaddress);
 }
 
 bool Socket::send(const Packet& packet) {
+	static const uint32_t HeaderSize = sizeof(unsigned long);
+	int length = 0;
+	uint32_t packetHeader = 0;
+
 	if (isValid() == false) {
 		return false;
 	}
@@ -259,18 +301,18 @@ bool Socket::send(const Packet& packet) {
 		return false;
 	}
 
-	int totalBytesSent = 0;
-	int bytesSent = 0;
-	int bytesLeft = packet.getSize();
+	packetHeader = packet.getSize();
+	packetHeader = htonl(packetHeader);
+	length = sizeof(packetHeader);
+	if (sendall(fd, &packetHeader, &length) == false) {
+		uninitialize();
+		return false;
+	}
 
-	while (totalBytesSent < packet.getSize()) {
-		if ((bytesSent = ::send(fd, packet.getData(), bytesLeft, 0)) == -1) {
-			close(fd);
-			fd = -1;
-			return false;
-		}
-		bytesLeft -= bytesSent;
-		totalBytesSent += bytesSent;
+	length = packet.getSize();
+	if (sendall(fd, packet.getData(), &length) == false) {
+		uninitialize();
+		return false;
 	}
 
 	return true;
@@ -280,6 +322,7 @@ bool Socket::receive(Packet& packet, bool blocking) {
 	static const unsigned int BufferLength = 1024;
 	char buffer[BufferLength];
 	int length = 0;
+	uint32_t packetHeader = 0;
 
 	if (isValid() == false) {
 		return false;
@@ -305,15 +348,19 @@ bool Socket::receive(Packet& packet, bool blocking) {
 			return false;
 		}
 	}
-
-	length = recv(fd, buffer, BufferLength, 0);
-	if (length == -1) {
-		close(fd);
-		fd = -1;
+	length = sizeof(packetHeader);
+	if (receiveall(fd, &packetHeader, &length) == false) {
+		uninitialize();
 		return false;
-	} else if (length == 0) {
-		close(fd);
-		fd = -1;
+	}
+	packetHeader = ntohl(packetHeader);
+	if (packetHeader >= 1024) {
+		printf("%s::%d: Internal error! %lu >= 1024.\n", __FILE__, __LINE__, packetHeader);
+		return false;//exit(1);
+	}
+	length = packetHeader;
+	if (receiveall(fd, buffer, &length) == false) {
+		uninitialize();
 		return false;
 	}
 

@@ -4,12 +4,19 @@
 #include <arpa/inet.h>
 
 #include "Packet.h"
+#include "IPAddress.h"
+
+#define closesocket close
 
 class Socket {
 	int fd;
 	int type;
 	sockaddr_in address;
 	bool broadcastOption;
+
+	int send(void* data, int length);
+
+	int receive(void* data, int* length, bool blocking = true);
 
 public:
 	enum Type {
@@ -48,10 +55,12 @@ public:
 	bool connect(const char* ip, int port);
 
 	// Send a UDP packet 
-	bool send(const Packet& packet, const sockaddr_in& newaddress);
+//	bool send(const Packet& packet, const sockaddr_in& newaddress);
+	bool send(const Packet& packet, const IPAddress& newaddress);
 
 	// Receive UDP packet and store the sender's address in newaddress
-	bool receive(Packet& packet, sockaddr_in* newaddress, bool blocking = true);
+//	bool receive(Packet& packet, sockaddr_in* newaddress, bool blocking = true);
+	bool receive(Packet& packet, IPAddress* newaddress, bool blocking = true);
 
 	// Broadcast a packet 
 	bool sendBroadcast(const Packet& packet, int port);
